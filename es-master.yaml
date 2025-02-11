@@ -1,0 +1,478 @@
+##====================================================================================##
+##                   PersistentVolume for Elasticsearch Master Node                   ##
+##                                                                                    ##
+## Purpose:                                                                           ##
+## --------                                                                           ##
+## This PersistentVolume provides storage for the Elasticsearch master nodes.         ##
+## It uses a hostPath on the local filesystem to store data persistently.             ##
+##                                                                                    ##
+## Usage:                                                                             ##
+## ------                                                                             ##
+## - Ensure that the host path (/home/elastic/master) exists or can be created.       ##
+## - The volume is configured with a 5Gi capacity and is retained even after release. ##
+##====================================================================================##
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  # The name of the PersistentVolume for identification.
+  name: es-master-pv
+  labels:
+    # Label used to denote the type of volume (local in this case).
+    type: local
+spec:
+  # Specifies the storage class that the volume belongs to.
+  storageClassName: standard
+  capacity:
+    # Allocates 5Gi of storage space for Elasticsearch master node data.
+    storage: 5Gi
+  accessModes:
+    # Allows the volume to be mounted as read/write by a single node.
+    - ReadWriteOnce
+  # Retain the volume data even after the PersistentVolumeClaim is deleted.
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    # Path on the host machine where Elasticsearch data is stored.
+    path: /home/elastic/master
+    # Type ensures that the directory is created if it does not exist.
+    type: DirectoryOrCreate
+
+---
+
+##====================================================================================##
+##                 PersistentVolumeClaim for Elasticsearch Master Node                ##
+##                                                                                    ##
+## Purpose:                                                                           ##
+## --------                                                                           ##
+## This PersistentVolumeClaim (PVC) requests storage from the above PersistentVolume  ##
+## for Elasticsearch master nodes. It ensures that the required 5Gi storage is bound. ##
+##                                                                                    ##
+## Usage:                                                                             ##
+## ------                                                                             ##
+## - The PVC is created in the 'observability' namespace and requests 5Gi of storage. ##
+## - It uses the same storageClassName as the PV to ensure proper binding.            ##
+##====================================================================================##
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  # The name of the PersistentVolumeClaim for Elasticsearch master.
+  name: es-master-pvc
+  # Namespace in which the PVC is created.
+  namespace: observability
+spec:
+  # Specifies the storage class to match the PV.
+  storageClassName: standard
+  accessModes:
+    # Requests a single node to have read/write access.
+    - ReadWriteOnce
+  resources:
+    requests:
+      # The PVC requests 5Gi of persistent storage.
+      storage: 5Gi
+
+---
+
+##=======================================================================================##
+##                     Headless Service for Elasticsearch Master Node                    ##
+## Purpose:                                                                              ##
+## --------                                                                              ##
+## This Service creates a headless endpoint for the Elasticsearch master StatefulSet.    ##
+## It enables direct DNS resolution for each pod in the StatefulSet without a clusterIP. ##
+##                                                                                       ##
+## Usage:                                                                                ##
+## ------                                                                                ##
+## - The headless service allows Elasticsearch pods to be addressed individually.        ##
+## - It publishes not-ready addresses to aid in discovery during startup.                ##
+##=======================================================================================##
+
+apiVersion: v1
+kind: Service
+metadata:
+  # The name of the headless service for Elasticsearch master nodes.
+  name: es-master-headless
+  # Namespace where the service is deployed.
+  namespace: observability
+
+spec:
+  # Creates a headless service by setting clusterIP to None.
+  clusterIP: None
+  # Publishes addresses of pods even when they are not yet ready.
+  publishNotReadyAddresses: true
+  ports:
+
+    # Name of the HTTP port configuration.
+    - name: http
+      # Port that the service exposes for HTTP traffic.
+      port: 9200
+      # The target port on the pod for HTTP communication.
+      targetPort: 9200
+
+    # Name of the transport port configuration.
+    - name: transport
+      # Port that the service exposes for inter-node communication.
+      port: 9300
+      # The target port on the pod for transport traffic.
+      targetPort: 9300
+
+  selector:
+    # Selects pods labeled with app=es-master to be part of this service.
+    app: es-master
+
+---
+
+##==================================================================================##
+##                    Standard Service for Elasticsearch Master                     ##
+## Purpose:                                                                         ##
+## --------                                                                         ##
+## This Service provides a standard endpoint for accessing the Elasticsearch master ##
+## pods from within the Kubernetes cluster. It routes HTTP and transport traffic to ##
+## the correct ports on the pods.                                                   ##
+##                                                                                  ##
+## Usage:                                                                           ##
+## ------                                                                           ##
+## - The service selects pods using the label app=es-master and forwards traffic to ##
+##   ports 9200 (HTTP) and 9300 (transport).                                        ##
+##==================================================================================##
+
+apiVersion: v1
+kind: Service
+metadata:
+  # The name of the standard service for Elasticsearch master.
+  name: es-master
+  # Namespace where the service is created.
+  namespace: observability
+
+spec:
+  ports:
+    # Name for the HTTP port configuration.
+    - name: http
+      # Port exposed by the service for HTTP traffic.
+      port: 9200
+      # Target port on the pod for HTTP communication.
+      targetPort: 9200
+
+    # Name for the transport port configuration.
+    - name: transport
+      # Port exposed by the service for transport traffic.
+      port: 9300
+      # Target port on the pod for transport communication.
+      targetPort: 9300
+
+  selector:
+    # Selects the Elasticsearch master pods using the label app=es-master.
+    app: es-master
+
+---
+
+##========================================================================================##
+##                       StatefulSet for Elasticsearch Master Nodes                       ##
+## Purpose:                                                                               ##
+## --------                                                                               ##
+## This StatefulSet manages the Elasticsearch master nodes. It ensures that each pod      ##
+## in the cluster has a stable identity and persistent storage, using the above PVC.      ##
+## It also configures pod anti-affinity, security settings, initContainers, and probes    ##
+## to maintain cluster health and stability.                                              ##
+##                                                                                        ##
+## Usage:                                                                                 ##
+## ------                                                                                 ##
+## - The StatefulSet deploys 3 replicas of Elasticsearch master nodes.                    ##
+## - Each pod is assigned persistent storage and unique network identities via a headless ##
+##   service.                                                                             ##
+##========================================================================================##
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  # The name of the StatefulSet managing Elasticsearch master nodes.
+  name: es-master
+  # Namespace where the StatefulSet is deployed.
+  namespace: observability
+  labels:
+    # Label used to identify Elasticsearch master pods.
+    app: es-master
+
+spec:
+  # Name of the headless service providing stable network identities.
+  serviceName: es-master-headless
+  # Number of Elasticsearch master replicas.
+  replicas: 3
+  # Use parallel pod management to speed up scaling operations.
+  podManagementPolicy: Parallel
+  # Retain persistent volume claims when pods are deleted or scaled.
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+
+  selector:
+    matchLabels:
+      # Selects pods with the label app=es-master.
+      app: es-master
+
+  template:
+    metadata:
+      labels:
+        # Labels assigned to each Elasticsearch master pod.
+        app: es-master
+
+    spec:
+      affinity:
+        podAntiAffinity:
+          # Preferred rule to avoid scheduling master pods on the same host.
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 1
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: ["es-master"]
+                # Topology key to separate pods across different hosts.
+                topologyKey: kubernetes.io/hostname
+
+      securityContext:
+        # Group ID for filesystem permissions.
+        fsGroup: 1000
+        # User ID under which the pod runs.
+        runAsUser: 1000
+
+      initContainers:
+        - name: set-vm-max-map-count
+          # Busybox is used to set the vm.max_map_count sysctl parameter.
+          image: busybox
+          # Command to update the maximum memory map count.
+          command: ["sysctl", "-w", "vm.max_map_count=262144"]
+          securityContext:
+            # Run the init container with privileged permissions to modify sysctl settings.
+            privileged: true
+
+      containers:
+        - name: elasticsearch
+          # Docker image for Elasticsearch version 8.17.1.
+          image: docker.elastic.co/elasticsearch/elasticsearch:8.17.1
+          # Pull the image only if it is not present on the node.
+          imagePullPolicy: IfNotPresent
+
+          envFrom:
+            # Loads environment variables from the elasticsearch-config ConfigMap.
+            - configMapRef:
+                name: elasticsearch-config
+          env:
+            # Environment variable to set the node's name dynamically.
+            # This variable ensures each Elasticsearch node has a unique name derived
+            # from the pod's metadata.name field, aiding in identification and logging.
+            - name: node.name
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+
+            # Environment variable to inject the password for the "elastic" superuser.
+            # The password is securely retrieved from the elasticsearch-credentials Secret.
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: elasticsearch-credentials
+                  key: password
+
+            # Environment variable for bootstrapping the initial master nodes.
+            # Lists the initial master node names to prevent split-brain during cluster formation.
+            - name: cluster.initial_master_nodes
+              value: "es-master-0,es-master-1,es-master-2"
+
+            # Environment variable to define the roles for this Elasticsearch node.
+            # Roles include master, data, and remote_cluster_client to handle various tasks.
+            - name: node.roles
+              value: "master,data,remote_cluster_client"
+
+          ports:
+            # Container port for HTTP traffic.
+            - name: http
+              protocol: TCP
+              containerPort: 9200
+
+            # Container port for internal transport communication.
+            - name: transport
+              protocol: TCP
+              containerPort: 9300
+
+        readinessProbe:
+          exec:
+            command:
+            - bash
+            - -c
+            - |
+              set -e
+
+              # Exit if ELASTIC_PASSWORD in unset
+              if [ -z "${ELASTIC_PASSWORD}" ]; then
+                echo "ELASTIC_PASSWORD variable is missing, exiting"
+                exit 1
+              fi
+
+              # If the node is starting up wait for the cluster to be ready (request params: "wait_for_status=green&timeout=1s" )
+              # Once it has started only check that the node itself is responding
+              START_FILE=/tmp/.es_start_file
+
+              # Disable nss cache to avoid filling dentry cache when calling curl
+              # This is required with Elasticsearch Docker using nss < 3.52
+              export NSS_SDB_USE_CACHE=no
+
+              http () {
+                local path="${1}"
+                local args="${2}"
+                set -- -XGET -s
+
+                if [ "$args" != "" ]; then
+                  set -- "$@" $args
+                fi
+
+                set -- "$@" -u "elastic:${ELASTIC_PASSWORD}"
+
+                curl --output /dev/null -k "$@" "https://127.0.0.1:9200${path}"
+              }
+
+              if [ -f "${START_FILE}" ]; then
+                echo 'Elasticsearch is already running, lets check the node is healthy'
+                HTTP_CODE=$(http "/" "-w %{http_code}")
+                RC=$?
+                if [[ ${RC} -ne 0 ]]; then
+                  echo "curl --output /dev/null -k -XGET -s -w '%{http_code}' \${BASIC_AUTH} https://127.0.0.1:9200/ failed with RC ${RC}"
+                  exit ${RC}
+                fi
+                # ready if HTTP code 200, 503 is tolerable if ES version is 6.x
+                if [[ ${HTTP_CODE} == "200" ]]; then
+                  exit 0
+                elif [[ ${HTTP_CODE} == "503" && "8" == "6" ]]; then
+                  exit 0
+                else
+                  echo "curl --output /dev/null -k -XGET -s -w '%{http_code}' \${BASIC_AUTH} https://127.0.0.1:9200/ failed with HTTP code ${HTTP_CODE}"
+                  exit 1
+                fi
+
+              else
+                echo 'Waiting for elasticsearch cluster to become ready (request params: "wait_for_status=green&timeout=1s" )'
+                if http "/_cluster/health?wait_for_status=green&timeout=1s" "--fail" ; then
+                  touch ${START_FILE}
+                  exit 0
+                else
+                  echo 'Cluster is not yet ready (request params: "wait_for_status=green&timeout=1s" )'
+                  exit 1
+                fi
+              fi
+
+            # Number of consecutive failures for the probe to be considered failed.
+            failureThreshold: 3
+
+            # Delay before the first readiness check is performed.
+            initialDelaySeconds: 10
+
+            # Frequency at which the readiness check is performed.
+            periodSeconds: 10
+
+            # Number of consecutive successes required to mark the pod as ready.
+            successThreshold: 3
+
+            # Timeout for the readiness check.
+            timeoutSeconds: 5
+
+          volumeMounts:
+            - name: es-master
+              # Mounts the persistent storage volume at the designated directory.
+              mountPath: /usr/share/elasticsearch/data
+
+            - name: elasticsearch-certs
+              # Mounts the directory containing Elasticsearch certificates.
+              mountPath: /usr/share/elasticsearch/config/certs
+              readOnly: true
+
+      volumes:
+        - name: elasticsearch-certs
+          secret:
+            # References the Secret that holds the Elasticsearch certificates.
+            secretName: elasticsearch-certs
+
+  volumeClaimTemplates:
+    - metadata:
+        # Name of the volume claim template for Elasticsearch master nodes.
+        name: es-master
+      spec:
+        accessModes:
+          # Requests read/write access from a single node.
+          - ReadWriteOnce
+        resources:
+          requests:
+            # Requests 5Gi of storage for each Elasticsearch master pod.
+            storage: 5Gi
+
+---
+
+##====================================================================================##
+##                          Ingress for Elasticsearch Master                          ##
+## Purpose:                                                                           ##
+## --------                                                                           ##
+## This Ingress resource exposes Elasticsearch master nodes externally. It routes     ##
+## HTTPS traffic based on hostnames and uses SSL passthrough to ensure secure         ##
+## communication with the cluster.                                                    ##
+##                                                                                    ##
+## Usage:                                                                             ##
+## ------                                                                             ##
+## - The Ingress routes external requests to the Elasticsearch master service on port ##
+##   9200 for each specified host.                                                    ##
+## - TLS is configured using certificates stored in the elasticsearch-certs Secret.   ##
+##====================================================================================##
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  # Name of the Ingress resource for Elasticsearch master.
+  name: es-master-ingress
+  # Namespace where the Ingress is deployed.
+  namespace: observability
+  annotations:
+    # Specifies that the backend service uses HTTPS protocol.
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    # Enables SSL passthrough for secure end-to-end encryption.
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+spec:
+  tls:
+    - hosts:
+        # Hostnames for the Elasticsearch master nodes.
+        - es-master-01.marvel.com
+        - es-master-02.marvel.com
+        - es-master-03.marvel.com
+      # Secret that contains the TLS certificates for these hosts.
+      secretName: elasticsearch-certs
+  rules:
+    - host: es-master-01.marvel.com
+      http:
+        paths:
+          - path: /
+            # Uses a prefix match for routing all paths starting with '/'
+            pathType: Prefix
+            backend:
+              service:
+                # Routes traffic to the Elasticsearch master service.
+                name: es-master
+                port:
+                  number: 9200
+    - host: es-master-02.marvel.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: es-master
+                port:
+                  number: 9200
+    - host: es-master-03.marvel.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: es-master
+                port:
+                  number: 9200

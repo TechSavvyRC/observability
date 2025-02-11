@@ -1,0 +1,188 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: kibana-pv
+  labels:
+    type: local
+spec:
+  storageClassName: standard
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /home/kibana
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kibana-pvc
+  namespace: observability
+spec:
+  storageClassName: standard
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kibana-role-setup
+  namespace: observability
+spec:
+  template:
+    spec:
+      containers:
+      - name: elasticsearch-setup
+        image: appropriate/curl:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Testing connectivity to Elasticsearch..."
+          until curl -k -u elastic:${ELASTIC_PASSWORD} https://es-master.observability.svc.cluster.local:9200; 
+          do 
+            echo "Elasticsearch not ready. Retrying in 10s...";
+            sleep 10; 
+          done
+
+          echo "Updating kibana_system password..."
+          curl -k -X POST -u elastic:${ELASTIC_PASSWORD} \
+            https://es-master.observability.svc.cluster.local:9200/_security/user/kibana_system/_password \
+            -H 'Content-Type: application/json' \
+            -d "{\"password\":\"${KIBANA_SYSTEM_PASSWORD}\"}"
+
+        env:
+        - name: ELASTIC_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: elasticsearch-credentials
+              key: password
+        - name: KIBANA_SYSTEM_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kibana-system-credentials
+              key: password
+      restartPolicy: Never
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana
+  namespace: observability
+spec:
+  type: NodePort
+  ports:
+  - port: 5601
+    targetPort: 5601
+    nodePort: 30561
+  selector:
+    app: kibana
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kibana
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      labels:
+        app: kibana
+
+    spec:
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+
+      initContainers:
+      - name: fix-permissions
+        image: busybox:latest
+        command: ["sh", "-c", "chown -R 1000:1000 /usr/share/kibana/data && chmod -R 755 /usr/share/kibana/data"]
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - name: kibana-data
+          mountPath: /usr/share/kibana/data
+
+      containers:
+      - name: kibana
+        image: docker.elastic.co/kibana/kibana:8.17.1
+
+        envFrom:
+        - configMapRef:
+            name: kibana-config
+        env:
+        # Specifies the URL of the Elasticsearch cluster Kibana will connect to.
+        # This must match the service name and namespace in Kubernetes, using HTTPS to ensure secure communication.
+        - name: ELASTICSEARCH_HOSTS
+          value: "https://es-master.observability.svc.cluster.local:9200"
+
+        # References a Kubernetes Secret that securely stores the Elasticsearch username.
+        # Refers to the specific key within the secret where the username is stored.
+        # This ensures credentials are not exposed in plaintext within manifests
+        - name: ELASTICSEARCH_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: kibana-system-credentials
+              key: username
+
+        # Similar to the username, this references the secret containing the password.
+        # The key within the secret where the password is securely stored.
+        # This method helps maintain strong security practices by avoiding hardcoded credentials.
+        - name: ELASTICSEARCH_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kibana-system-credentials
+              key: password
+        
+        ports:
+        - containerPort: 5601
+
+        volumeMounts:
+        - name: kibana-data
+          mountPath: /usr/share/kibana/data
+        - name: elasticsearch-certs
+          mountPath: /usr/share/kibana/config/certs
+          readOnly: true
+
+      volumes:
+      - name: kibana-data
+        persistentVolumeClaim:
+          claimName: kibana-pvc
+      - name: elasticsearch-certs
+        secret:
+          secretName: elasticsearch-certs
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kibana-ingress
+  namespace: observability
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+spec:
+  tls:
+  - hosts:
+    - kibana.marvel.com
+    secretName: elasticsearch-certs
+  rules:
+  - host: kibana.marvel.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kibana
+            port:
+              number: 5601

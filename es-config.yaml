@@ -1,0 +1,104 @@
+##===================================================================================##
+##                        Elasticsearch Configuration ConfigMap                      ##
+##                                                                                   ##
+## Purpose:                                                                          ##
+## --------                                                                          ##
+## This ConfigMap defines the core configuration for Elasticsearch master and data   ##
+## nodes running within a Kubernetes cluster. It centralizes common settings such as ##
+## cluster identification, node roles, discovery mechanisms, and security features.  ##
+##                                                                                   ##
+## Usage:                                                                            ##
+## ------                                                                            ##
+## - Shared by both Elasticsearch master and data nodes for consistent configuration ##
+## - Simplifies updates, as changes made here apply to all nodes referencing it      ##
+## - Mounted into Elasticsearch Pods to provide runtime configuration parameters     ##
+##                                                                                   ##
+## Key Configurations:                                                               ##
+## ------------------                                                                ##
+## - Cluster Setup: Identifies the cluster and defines node discovery settings       ##
+## - Node Roles: Configures nodes as master, data, or remote cluster clients         ##
+## - Security: Enables SSL/TLS encryption for both HTTP API and transport layers     ##
+## - Discovery: Ensures seamless clustering using Kubernetes headless services       ##
+##                                                                                   ##
+## Note:                                                                             ##
+## -----                                                                             ##
+## Adjust memory settings, security certificates, and discovery hosts as per your    ##
+## environment requirements. For scaling, ensure proper updates to seed hosts and    ##
+## initial master nodes.                                                             ##
+##===================================================================================##
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elasticsearch-config
+  namespace: observability
+data:
+  #=======================================#
+  #          Node Configuration           #
+  #=======================================#
+  # Unique cluster identifier for node discovery and cluster management
+  # Use consistent naming across environments to distinguish clusters
+  # Helps identify clusters when managing multiple environments.
+  cluster.name: "elasticsearch"
+
+  # Binds Elasticsearch to all available network interfaces
+  # This allows external connections to reach the node
+  # By default Elasticsearch is only accessible on localhost.
+  # "0.0.0.0" allows the node to accept connections from any IP address (used for external access).
+  network.host: "0.0.0.0"
+
+  #=======================================#
+  #       Cluster Discovery Settings      #
+  #=======================================#
+  # Specifies the initial list of master-eligible nodes for discovery when the cluster starts.
+  # Helps new nodes find and join the cluster.
+  # The DNS name or addresses other nodes use to discover this node.
+  # In Kubernetes, this points to the headless service for master nodes.
+  discovery.seed_hosts: "es-master-headless"
+
+  #=======================================#
+  #         Security Configuration        #
+  #=======================================#
+  # Enables Elasticsearch's built-in security features including authentication, authorization, and TLS encryption
+  xpack.security.enabled: "true"
+
+  ##---------------------- SSL/TLS HTTP Layer Security Settings -----------------------##
+  # Enables SSL/TLS encryption for HTTP (REST) API communications, securing data in transit.
+  xpack.security.http.ssl.enabled: "true"
+
+  # The private key used to secure HTTPS connections for the Elasticsearch HTTP API.
+  xpack.security.http.ssl.key: "/usr/share/elasticsearch/config/certs/tls.key"
+
+  # The SSL/TLS certificate for securing HTTPS connections to the Elasticsearch HTTP API.
+  xpack.security.http.ssl.certificate: "/usr/share/elasticsearch/config/certs/tls.crt"
+
+  # Specifies the trusted Certificate Authority (CA) used to verify client certificates for secure HTTP connections.
+  xpack.security.http.ssl.certificate_authorities: "/usr/share/elasticsearch/config/certs/ca.crt"
+
+  ##------ SSL/TLS Transport Layer Security Settings (Node-to-Node Communication) -----##
+  # Enables SSL/TLS encryption for inter-node communication within the Elasticsearch cluster.
+  xpack.security.transport.ssl.enabled: "true"
+
+  # Configures the verification mode for SSL certificates in the transport layer.
+  # "certificate" means the certificate will be validated, but the hostname will not be checked.
+  xpack.security.transport.ssl.verification_mode: "certificate"
+
+  # The private key used for securing encrypted communication between Elasticsearch nodes.
+  xpack.security.transport.ssl.key: "/usr/share/elasticsearch/config/certs/tls.key"
+
+  # The SSL/TLS certificate for encrypted node-to-node communication within the cluster.
+  xpack.security.transport.ssl.certificate: "/usr/share/elasticsearch/config/certs/tls.crt"
+
+  # Specifies the trusted Certificate Authority (CA) to verify node certificates in the transport layer.
+  xpack.security.transport.ssl.certificate_authorities: "/usr/share/elasticsearch/config/certs/ca.crt"
+
+  #=======================================#
+  #          JVM Memory Settings          #
+  #=======================================#
+  # Controls Java heap memory allocation - using equal initial and maximum values (512MB) 
+  # prevents heap resizing and improves performance. Adjust based on available node memory.
+  # Sets Java Virtual Machine (JVM) heap size options for Elasticsearch:
+  # -Xmx512m: Maximum heap size set to 512 MB.
+  # -Xms512m: Initial heap size set to 512 MB.
+  ES_JAVA_OPTS: "-Xmx512m -Xms512m"
+

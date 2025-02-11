@@ -1,0 +1,85 @@
+##====================================================================================##
+##                            Kibana Configuration ConfigMap                          ##
+##                                                                                    ##
+## Purpose:                                                                           ##
+## --------                                                                           ##
+## This ConfigMap defines the core configuration for Kibana running within a          ##
+## Kubernetes cluster. It centralizes common settings such as SSL/TLS configurations, ##
+## Elasticsearch connectivity, and security features.                                 ##
+##                                                                                    ##
+## Usage:                                                                             ##
+## ------                                                                             ##
+## - Provides runtime configuration for Kibana Pods within the cluster                ##
+## - Simplifies updates as changes here apply to all Pods referencing this ConfigMap  ##
+## - Enhances security by managing SSL certificates and encryption keys centrally     ##
+##                                                                                    ##
+## Key Configurations:                                                                ##
+## ------------------                                                                 ##
+## - SSL/TLS Security: Enables secure HTTPS communication with Kibana                 ##
+## - Elasticsearch Integration: Configures Kibana to securely connect to              ##
+##   Elasticsearch using trusted certificates                                         ##
+## - Public Access: Defines the base URL for Kibana access                            ##
+## - Security Encryption: Secures sensitive Kibana settings and session data          ##
+##                                                                                    ##
+## Note:                                                                              ##
+## -----                                                                              ##
+## Adjust SSL certificate paths, encryption keys, and public base URL according to    ##
+## your environment. Ensure proper synchronization with Elasticsearch security        ##
+## configurations for seamless integration.                                           ##
+##====================================================================================##
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kibana-config
+  namespace: observability
+
+data:
+  #=======================================#
+  #         Server Configuration          #
+  #=======================================#
+  # Enables SSL/TLS for Kibana's HTTP server.
+  # This secures communication between clients (browsers) and Kibana.
+  SERVER_SSL_ENABLED: "true"
+
+  # The SSL/TLS certificate file used to secure HTTPS connections for Kibana.
+  # This should match the domain used to access Kibana (e.g., kibana.marvel.com).
+  SERVER_SSL_CERTIFICATE: "/usr/share/kibana/config/certs/tls.crt"
+
+  # The private key corresponding to the SSL/TLS certificate.
+  # This key is critical for establishing secure HTTPS connections.
+  SERVER_SSL_KEY: "/usr/share/kibana/config/certs/tls.key"
+
+  # Specifies the trusted Certificate Authority (CA) certificate
+  # to verify client connections if mutual TLS is used.
+  SERVER_SSL_CERTIFICATE_AUTHORITIES: "/usr/share/kibana/config/certs/ca.crt"
+
+  #=======================================#
+  #       Elasticsearch Integration       #
+  #=======================================#
+  # Defines the trusted CA certificate that Kibana uses to verify
+  # the identity of Elasticsearch nodes when establishing secure connections.
+  ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES: "/usr/share/kibana/config/certs/ca.crt"
+
+  #=======================================#
+  #        Kibana Base URL Setting        #
+  #=======================================#
+  # Specifies the publicly accessible URL for Kibana.
+  # This is useful when Kibana is behind a reverse proxy or load balancer.
+  SERVER_PUBLICBASEURL: "https://kibana.marvel.com"
+
+  #=======================================#
+  #           Security Settings           #
+  #=======================================#
+  # Encryption key for securing sensitive data stored in Kibana,
+  # such as session information, saved objects, and API keys.
+  # Use a strong, unique key to prevent unauthorized access.
+  XPACK_SECURITY_ENCRYPTIONKEY: "dc8nbujE2vjkEX3ORgXVY+NCl6VljXkw6lIcd10HVuk="
+
+  #=======================================#
+  #       Monitoring Configuration        #
+  #=======================================#
+  # Controls Cross-Cluster Search (CCS) for Kibana monitoring UI.
+  # Set to "false" if Kibana is only monitoring a single Elasticsearch cluster.
+  monitoring.ui.ccs.enabled: "false"
+
