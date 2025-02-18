@@ -236,15 +236,15 @@ spec:
         # User ID under which the pod runs.
         runAsUser: 1000
 
-      initContainers:
-        - name: set-vm-max-map-count
-          # Busybox is used to set the vm.max_map_count sysctl parameter.
-          image: busybox
-          # Command to update the maximum memory map count.
-          command: ["sysctl", "-w", "vm.max_map_count=262144"]
-          securityContext:
-            # Run the init container with privileged permissions to modify sysctl settings.
-            privileged: true
+      #initContainers:
+      #  - name: set-vm-max-map-count
+      #    # Busybox is used to set the vm.max_map_count sysctl parameter.
+      #    image: busybox
+      #    # Command to update the maximum memory map count.
+      #    command: ["sysctl", "-w", "vm.max_map_count=262144"]
+      #    securityContext:
+      #      # Run the init container with privileged permissions to modify sysctl settings.
+      #      privileged: true
 
       containers:
         - name: elasticsearch
